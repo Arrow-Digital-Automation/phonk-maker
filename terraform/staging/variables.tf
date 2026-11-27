@@ -29,45 +29,20 @@ variable "release_id" {
   }
 }
 
-variable "image_repository" {
-  description = "Staging ECR repository base URL; supplied by an environment-scoped binding."
+variable "aws_region" {
+  description = "AWS region for staging resources; supplied by the environment-scoped AWS_REGION variable."
   type        = string
-
-  validation {
-    condition     = length(trimspace(var.image_repository)) > 0
-    error_message = "image_repository must not be empty."
-  }
+  default     = "us-east-2"
 }
 
-variable "desired_replicas" {
-  description = "Single staging web instance."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.desired_replicas == 1
-    error_message = "Staging must run exactly one web replica."
-  }
+variable "aws_account_id" {
+  description = "AWS account that staging must be applied in."
+  type        = string
+  default     = "210918199836"
 }
 
-variable "manager_count" {
-  description = "Single Swarm manager; no manager nodes are added."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.manager_count == 1
-    error_message = "Staging must keep exactly one Swarm manager."
-  }
-}
-
-variable "worker_count" {
-  description = "No extra Swarm nodes."
-  type        = number
-  default     = 0
-
-  validation {
-    condition     = var.worker_count == 0
-    error_message = "Staging must not add Swarm worker nodes."
-  }
+variable "price_class" {
+  description = "CloudFront price class for staging."
+  type        = string
+  default     = "PriceClass_100"
 }

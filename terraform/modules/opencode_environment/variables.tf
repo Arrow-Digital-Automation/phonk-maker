@@ -28,44 +28,28 @@ variable "release_id" {
   }
 }
 
-variable "image_repository" {
-  description = "Environment-scoped ECR repository base URL. The tag is the release revision."
+variable "aws_account_id" {
+  description = "AWS account this environment must be applied in; guards against wrong-account credentials."
   type        = string
 
   validation {
-    condition     = length(trimspace(var.image_repository)) > 0
-    error_message = "image_repository must not be empty."
+    condition     = can(regex("^[0-9]{12}$", var.aws_account_id))
+    error_message = "aws_account_id must be a 12-digit AWS account ID."
   }
 }
 
-variable "desired_replicas" {
-  description = "Desired task count for the single web service."
-  type        = number
-
-  validation {
-    condition     = var.desired_replicas >= 1 && var.desired_replicas <= 6
-    error_message = "desired_replicas must be between 1 and 6."
-  }
+variable "site_index_path" {
+  description = "Path to the static site index.html uploaded for this release."
+  type        = string
 }
 
-variable "manager_count" {
-  description = "Swarm manager count. This topology must keep exactly one manager."
-  type        = number
-  default     = 1
+variable "price_class" {
+  description = "CloudFront price class."
+  type        = string
+  default     = "PriceClass_100"
 
   validation {
-    condition     = var.manager_count == 1
-    error_message = "This topology requires exactly one Swarm manager; do not add manager nodes."
-  }
-}
-
-variable "worker_count" {
-  description = "Swarm worker count. This topology must not add extra Swarm nodes."
-  type        = number
-  default     = 0
-
-  validation {
-    condition     = var.worker_count == 0
-    error_message = "This topology must not add Swarm worker nodes."
+    condition     = contains(["PriceClass_100", "PriceClass_200", "PriceClass_All"], var.price_class)
+    error_message = "price_class must be PriceClass_100, PriceClass_200, or PriceClass_All."
   }
 }

@@ -19,6 +19,15 @@ on:
         description: Release identifier for the deployment receipt
         required: true
         type: string
+      operation:
+        description: Operation to run
+        required: false
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - reload
+          - destroy
 
 permissions:
   contents: read
@@ -34,26 +43,36 @@ jobs:
     outputs:
       environment: ${{ steps.check.outputs.environment }}
       terraform_root: ${{ steps.check.outputs.terraform_root }}
+      operation: ${{ steps.check.outputs.operation }}
     steps:
-      - name: Validate environment, protected branch, and exact revision
+      - name: Check out protected branch history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate environment, protected branch, operation, and exact revision
         id: check
         shell: bash
         env:
           TARGET_ENVIRONMENT: ${{ inputs.environment }}
           TARGET_REVISION: ${{ inputs.revision }}
           TARGET_RELEASE_ID: ${{ inputs.release_id }}
+          TARGET_OPERATION: ${{ inputs.operation }}
           EVENT_SHA: ${{ github.sha }}
           EVENT_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
 
+          operation="${TARGET_OPERATION:-deploy}"
+
           case "$TARGET_ENVIRONMENT" in
             staging)
-              expected_ref="refs/heads/staging"
+              expected_branch="staging"
               terraform_root="terraform/staging"
               ;;
             production)
-              expected_ref="refs/heads/main"
+              expected_branch="main"
               terraform_root="terraform/production"
               ;;
             *)
@@ -62,8 +81,16 @@ jobs:
               ;;
           esac
 
-          if [[ "$EVENT_REF" != "$expected_ref" ]]; then
-            echo "Dispatch must come from protected branch $expected_ref (got $EVENT_REF)" >&2
+          case "$operation" in
+            deploy|reload|destroy) ;;
+            *)
+              echo "Unsupported operation: $operation" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ "$EVENT_REF" != "refs/heads/$expected_branch" ]]; then
+            echo "Dispatch must come from protected branch refs/heads/$expected_branch (got $EVENT_REF)" >&2
             exit 1
           fi
 
@@ -72,24 +99,36 @@ jobs:
             exit 1
           fi
 
-          if [[ "$EVENT_SHA" != "$TARGET_REVISION" ]]; then
-            echo "Event SHA $EVENT_SHA does not equal requested revision $TARGET_REVISION" >&2
-            exit 1
-          fi
-
           if [[ -z "${TARGET_RELEASE_ID//[[:space:]]/}" ]]; then
             echo "release_id must not be empty" >&2
             exit 1
           fi
 
+          if [[ "$operation" == "deploy" ]]; then
+            if [[ "$EVENT_SHA" != "$TARGET_REVISION" ]]; then
+              echo "Event SHA $EVENT_SHA does not equal requested revision $TARGET_REVISION" >&2
+              exit 1
+            fi
+          else
+            git cat-file -e "${TARGET_REVISION}^{commit}" 2>/dev/null || {
+              echo "Revision $TARGET_REVISION is not present in repository history" >&2
+              exit 1
+            }
+            if ! git merge-base --is-ancestor "$TARGET_REVISION" "origin/$expected_branch"; then
+              echo "Revision $TARGET_REVISION is not in protected branch $expected_branch history" >&2
+              exit 1
+            fi
+          fi
+
           {
             echo "environment=$TARGET_ENVIRONMENT"
             echo "terraform_root=$terraform_root"
+            echo "operation=$operation"
           } >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Deploy ${{ needs.guard.outputs.environment }}
-    needs: guard
+    name: ${{ needs.guard.outputs.operation }} ${{ needs.guard.outputs.environment }}
+    needs: [guard]
     runs-on: ubuntu-latest
     environment:
       # Required reviewers and environment-scoped secrets/vars are configured
@@ -116,7 +155,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OPENCODE_DEPLOY_ROLE_ARN }}
-          role-session-name: opencode-deploy-${{ inputs.environment }}-${{ inputs.release_id }}
+          role-session-name: opencode-${{ needs.guard.outputs.operation }}-${{ inputs.environment }}-${{ inputs.release_id }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Terraform init
@@ -154,11 +193,15 @@ jobs:
           TF_VAR_environment: ${{ inputs.environment }}
           TF_VAR_revision: ${{ inputs.revision }}
           TF_VAR_release_id: ${{ inputs.release_id }}
-          TF_VAR_image_repository: ${{ vars.IMAGE_REPOSITORY }}
-          OPENCODE_API_URL: ${{ vars.OPENCODE_API_URL }}
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          OPERATION: ${{ needs.guard.outputs.operation }}
         run: |
           set -euo pipefail
-          terraform plan -input=false -lock-timeout=5m -out=tfplan
+          if [[ "$OPERATION" == "destroy" ]]; then
+            terraform plan -destroy -input=false -lock-timeout=5m -out=tfplan
+          else
+            terraform plan -input=false -lock-timeout=5m -out=tfplan
+          fi
 
       - name: Terraform apply
         working-directory: ${{ needs.guard.outputs.terraform_root }}
@@ -169,6 +212,7 @@ jobs:
 
       - name: Read deployment outputs
         id: deployed
+        if: needs.guard.outputs.operation != 'destroy'
         working-directory: ${{ needs.guard.outputs.terraform_root }}
         shell: bash
         run: |
@@ -180,6 +224,7 @@ jobs:
 
       - name: Verify exact release over HTTPS
         id: verify
+        if: needs.guard.outputs.operation != 'destroy'
         shell: bash
         env:
           APP_URL: ${{ steps.deployed.outputs.app_url }}
@@ -227,17 +272,20 @@ jobs:
 
       - name: Publish GitHub deployment receipt
         id: receipt
+        if: needs.guard.outputs.operation != 'destroy'
         uses: actions/github-script@v7
         env:
           TARGET_ENVIRONMENT: ${{ inputs.environment }}
           TARGET_REVISION: ${{ inputs.revision }}
           RELEASE_ID: ${{ inputs.release_id }}
+          OPERATION: ${{ needs.guard.outputs.operation }}
           APP_URL: ${{ steps.deployed.outputs.app_url }}
         with:
           script: |
             const environment = process.env.TARGET_ENVIRONMENT;
             const ref = process.env.TARGET_REVISION;
             const releaseId = process.env.RELEASE_ID;
+            const operation = process.env.OPERATION;
             const appUrl = process.env.APP_URL;
             const logUrl =
               `https://github.com/${context.repo.owner}/${context.repo.repo}` +
@@ -251,8 +299,8 @@ jobs:
               task: "opencode-deploy",
               auto_merge: false,
               required_contexts: [],
-              payload: { opencodeRelease: releaseId },
-              description: `OpenCode deployment ${releaseId}`,
+              payload: { opencodeRelease: releaseId, opencodeOperation: operation },
+              description: `OpenCode ${operation} ${releaseId}`,
             });
 
             core.setOutput("deployment_id", deployment.id);
@@ -265,5 +313,46 @@ jobs:
               environment,
               environment_url: appUrl,
               log_url: logUrl,
-              description: `OpenCode deployment ${releaseId} succeeded`,
+              description: `OpenCode ${operation} ${releaseId} succeeded`,
+            });
+
+      - name: Publish GitHub destroy receipt
+        id: destroy_receipt
+        if: needs.guard.outputs.operation == 'destroy'
+        uses: actions/github-script@v7
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          TARGET_REVISION: ${{ inputs.revision }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        with:
+          script: |
+            const environment = process.env.TARGET_ENVIRONMENT;
+            const ref = process.env.TARGET_REVISION;
+            const releaseId = process.env.RELEASE_ID;
+            const logUrl =
+              `https://github.com/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const { data: deployment } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref,
+              environment,
+              task: "opencode-deploy",
+              auto_merge: false,
+              required_contexts: [],
+              payload: { opencodeRelease: releaseId, opencodeOperation: "destroy" },
+              description: `OpenCode destroy ${releaseId}`,
+            });
+
+            core.setOutput("deployment_id", deployment.id);
+
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.id,
+              state: "inactive",
+              environment,
+              log_url: logUrl,
+              description: `OpenCode destroy ${releaseId} completed`,
             });

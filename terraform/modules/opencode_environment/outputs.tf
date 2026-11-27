@@ -5,7 +5,7 @@ output "app_url" {
 
 output "verification_url" {
   description = "HTTPS release-marker URL used to verify the exact revision and release ID."
-  value       = "${trimSuffix(local.app_url, "/")}${local.release_marker_path}"
+  value       = "${local.app_url}${local.release_marker_path}"
 }
 
 output "revision" {
@@ -18,17 +18,12 @@ output "release_id" {
   value       = var.release_id
 }
 
-output "desired_replicas" {
-  description = "Configured desired replicas for the web service."
-  value       = var.desired_replicas
+output "bucket_name" {
+  description = "Private S3 bucket holding the static site."
+  value       = aws_s3_bucket.site.id
 }
 
-output "manager_count" {
-  description = "Configured Swarm manager count."
-  value       = var.manager_count
-}
-
-output "worker_count" {
-  description = "Configured Swarm worker count."
-  value       = var.worker_count
+output "distribution_id" {
+  description = "CloudFront distribution ID serving the site."
+  value       = aws_cloudfront_distribution.site.id
 }
