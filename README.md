@@ -21,10 +21,11 @@ required by browsers.
 1. Pick one of the 16 square pads (or use its keyboard shortcut). Clicking a pad
    also auditions it.
 2. Toggle the 16 square steps for the selected sound.
-3. Repeatedly press that pad or **TAP / RATE**. The app takes the median of the
-   last six press intervals (clamped to 80–1200 ms) and uses it as that sound's
-   step length. A 250 ms interval is 240 BPM. Rate changes recompile the
-   arrangement automatically without resetting the playback position.
+3. Set the tempo by repeatedly pressing that pad or **TAP / RATE**, or by typing
+   a BPM into the **TEMPO** field. Taps use the median of the last six press
+   intervals (clamped to 80–1200 ms); typed BPM is clamped to 50–750. A 250 ms
+   interval is 240 BPM. Either method updates that sound's step length and
+   recompiles the arrangement automatically without resetting playback.
 4. Press **COMPILE ARRANGEMENT** to merge all active sound patterns into one
    deterministic timeline of `{soundId, time, duration}` events, then use the
    transport bar.
