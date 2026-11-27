@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "name": "web",
+      "port": 8080,
+      "route": "/",
+      "health": "/"
+    }
+  ]
+}
