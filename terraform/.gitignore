@@ -1,0 +1,9 @@
+# Never commit Terraform state, plans, or local provider caches.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
