@@ -243,6 +243,19 @@
   .rate-card { border-color: rgba(255,176,46,.22); }
   .rate-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .rate-top h3 { font-size: 15px; }
+  .rate-controls { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+  .tempo-field { display: flex; flex-direction: column; gap: 4px; min-width: 104px; }
+  .tempo-field > span {
+    color: var(--muted-2); font-size: 10px; font-weight: 850; letter-spacing: .19em; text-transform: uppercase;
+  }
+  .tempo-field input {
+    width: 100%; min-height: 52px; padding: 7px 10px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel-2); color: var(--amber);
+    font: 800 20px/1.05 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: -.02em;
+  }
+  .tempo-field input:hover { border-color: rgba(255,176,46,.6); }
   .tap-button {
     display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     min-width: 132px; min-height: 52px; padding: 7px 14px;
@@ -419,7 +432,7 @@
       <ol class="how-steps">
         <li><b>01</b><span><strong>Pick a pad</strong><small>Each square is a synthesized voice. Press it to hear it.</small></span></li>
         <li><b>02</b><span><strong>Toggle steps</strong><small>Build a 16-step pattern for the selected sound.</small></span></li>
-        <li><b>03</b><span><strong>Tap to set rate</strong><small>Repeated pad presses become that sound's step interval.</small></span></li>
+        <li><b>03</b><span><strong>Tap or type tempo</strong><small>Repeated presses or a BPM value set that sound's step interval.</small></span></li>
         <li><b>04</b><span><strong>Compile &amp; play</strong><small>Merge all voices into one timeline, then use transport controls.</small></span></li>
       </ol>
     </details>
@@ -466,14 +479,20 @@
               <span class="eyebrow">PRESS-RATE RETIMING</span>
               <h3 id="rate-sound">808 KICK</h3>
             </div>
-            <button type="button" class="tap-button" id="tap-button">TAP / RATE <span id="tap-count">0 taps</span></button>
+            <div class="rate-controls">
+              <label class="tempo-field">
+                <span>TEMPO / BPM</span>
+                <input type="number" id="tempo-input" min="50" max="750" step="1" value="240" aria-describedby="rate-ms-readout">
+              </label>
+              <button type="button" class="tap-button" id="tap-button">TAP / RATE <span id="tap-count">0 taps</span></button>
+            </div>
           </div>
           <div class="rate-readout">
-            <div class="readout"><span id="rate-ms">250</span><small>MS / STEP</small></div>
+            <div class="readout" id="rate-ms-readout"><span id="rate-ms">250</span><small>MS / STEP</small></div>
             <div class="readout cyan"><span id="rate-bpm">240</span><small>BPM</small></div>
             <button type="button" class="mini" id="reset-rate">RESET</button>
           </div>
-          <p class="helper">Tap the pad or TAP / RATE repeatedly. Your press interval becomes this sound's step length — faster taps pack hits tighter. Median of the last 6 taps (80–1200 ms); rate changes recompile automatically.</p>
+          <p class="helper">Tap the pad or TAP / RATE repeatedly, or type a BPM in TEMPO. Press intervals use the median of the last 6 taps (80–1200 ms); typed BPM is clamped to 50–750. Either way this sound's step length updates and recompiles automatically.</p>
           <div class="mix-row">
             <label>
               <span>GAIN <output id="gain-out" for="gain-slider">95%</output></span>
@@ -541,6 +560,8 @@
   const STEPS = 16;
   const MIN_RATE = 80;
   const MAX_RATE = 1200;
+  const MIN_BPM = Math.round(60000 / MAX_RATE);
+  const MAX_BPM = Math.round(60000 / MIN_RATE);
   const TAP_TIMEOUT = 1800;
   const LOOKAHEAD = 0.14;
 
@@ -574,6 +595,8 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const bpmFromRate = rateMs => clamp(Math.round(60000 / rateMs), MIN_BPM, MAX_BPM);
+  const rateFromBpm = bpm => clamp(Math.round(60000 / bpm), MIN_RATE, MAX_RATE);
   const byId = Object.fromEntries(SOUND_DEFS.map(def => [def.id, def]));
   const keyMap = Object.fromEntries(SOUND_DEFS.map(def => [def.key.toLowerCase(), def.id]));
 
@@ -626,6 +649,7 @@
   let tapResetTimer = null;
   let toastTimer = null;
   let isScrubbing = false;
+  let tempoInputFocused = false;
   let position = 0;
   const playback = { active: false, startedAt: 0, offset: 0, nextIndex: 0 };
 
@@ -1056,6 +1080,7 @@
     rateSound: $('#rate-sound'),
     rateMs: $('#rate-ms'),
     rateBpm: $('#rate-bpm'),
+    tempoInput: $('#tempo-input'),
     tapButton: $('#tap-button'),
     tapCount: $('#tap-count'),
     gainSlider: $('#gain-slider'),
@@ -1169,12 +1194,14 @@
     updatePlayheadUI(position);
   }
 
-  function renderRatePanel() {
+  function renderRatePanel(syncTempo = false) {
     const current = selected();
     const definition = byId[current.id];
+    const bpm = bpmFromRate(current.rateMs);
     els.rateSound.textContent = definition.label;
     els.rateMs.textContent = String(current.rateMs);
-    els.rateBpm.textContent = String(Math.round(60000 / current.rateMs));
+    els.rateBpm.textContent = String(bpm);
+    if (syncTempo || !tempoInputFocused) els.tempoInput.value = String(bpm);
     const taps = state.tap.soundId === current.id ? state.tap.taps : 0;
     els.tapCount.textContent = `${taps} ${taps === 1 ? 'tap' : 'taps'}`;
 
@@ -1531,13 +1558,21 @@
     }).catch(() => { /* audition is optional; user can retry */ });
   }
 
-  function clearTapSession() {
+  function resetTapMeasurement() {
     state.tap.soundId = null;
     state.tap.last = 0;
     state.tap.taps = 0;
     state.tap.intervals = [];
+    if (tapResetTimer !== null) {
+      window.clearTimeout(tapResetTimer);
+      tapResetTimer = null;
+    }
+  }
+
+  function clearTapSession() {
+    resetTapMeasurement();
     if (state.status === 'tapping') state.status = 'idle';
-    renderRatePanel();
+    renderRatePanel(true);
     renderStatus();
   }
 
@@ -1549,6 +1584,36 @@
       compileArrangement({ keepFraction: true, announce: false });
       flash('Rate updated · arrangement recompiled');
     }, 160);
+  }
+
+  function applyTempoInput(finalize = false) {
+    const current = selected();
+    const raw = els.tempoInput.value.trim();
+    const parsed = Number(raw);
+    const fallback = bpmFromRate(current.rateMs);
+    const bpm = raw !== '' && Number.isFinite(parsed)
+      ? clamp(Math.round(parsed), MIN_BPM, MAX_BPM)
+      : fallback;
+    const nextRate = rateFromBpm(bpm);
+
+    const wasTapping = state.status === 'tapping';
+    resetTapMeasurement();
+    if (wasTapping) state.status = 'idle';
+    els.tapCount.textContent = '0 taps';
+
+    const changed = nextRate !== current.rateMs;
+    if (changed) {
+      current.rateMs = nextRate;
+      state.compiledDirty = true;
+      renderCompileSummary();
+      scheduleAutoRecompile();
+    }
+    if (wasTapping || changed) renderStatus();
+
+    const shownBpm = bpmFromRate(current.rateMs);
+    els.rateMs.textContent = String(current.rateMs);
+    els.rateBpm.textContent = String(shownBpm);
+    if (finalize) els.tempoInput.value = String(shownBpm);
   }
 
   function measureTap(id) {
@@ -1580,7 +1645,7 @@
     }
 
     state.status = 'tapping';
-    renderRatePanel();
+    renderRatePanel(true);
     renderStatus();
     renderCompileSummary();
     if (tapResetTimer !== null) window.clearTimeout(tapResetTimer);
@@ -1592,7 +1657,7 @@
     state.selectedId = id;
     renderPads();
     renderSteps();
-    renderRatePanel();
+    renderRatePanel(true);
     updatePlayheadUI(position);
   }
 
@@ -1627,6 +1692,14 @@
     });
 
     els.tapButton.addEventListener('click', () => handlePadPress(state.selectedId, els.tapButton));
+
+    els.tempoInput.addEventListener('focus', () => { tempoInputFocused = true; });
+    els.tempoInput.addEventListener('blur', () => {
+      tempoInputFocused = false;
+      applyTempoInput(true);
+    });
+    els.tempoInput.addEventListener('input', () => applyTempoInput(false));
+    els.tempoInput.addEventListener('change', () => applyTempoInput(true));
 
     els.clearSteps.addEventListener('click', () => {
       selected().pattern.fill(false);
@@ -1727,7 +1800,8 @@
       const tag = target instanceof Element ? target.tagName.toLowerCase() : '';
       const typing = tag === 'input' || tag === 'textarea' || tag === 'select' ||
         (target instanceof Element && (target.isContentEditable || target.closest('[contenteditable="true"]')));
-      if (event.defaultPrevented || typing || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.defaultPrevented || target === els.tempoInput || typing ||
+          event.ctrlKey || event.metaKey || event.altKey) return;
 
       if (event.code === 'Space' || event.key === ' ') {
         if (target instanceof Element && target.closest('button, summary, [role="button"]')) return;
