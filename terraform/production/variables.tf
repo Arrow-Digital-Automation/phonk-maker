@@ -29,45 +29,20 @@ variable "release_id" {
   }
 }
 
-variable "image_repository" {
-  description = "Production ECR repository base URL; supplied by an environment-scoped binding."
+variable "aws_region" {
+  description = "AWS region for production resources; supplied by the environment-scoped AWS_REGION variable."
   type        = string
-
-  validation {
-    condition     = length(trimspace(var.image_repository)) > 0
-    error_message = "image_repository must not be empty."
-  }
+  default     = "us-east-2"
 }
 
-variable "desired_replicas" {
-  description = "Two web instances on the single Swarm manager."
-  type        = number
-  default     = 2
-
-  validation {
-    condition     = var.desired_replicas == 2
-    error_message = "Production must run exactly two web replicas."
-  }
+variable "aws_account_id" {
+  description = "AWS account that production must be applied in."
+  type        = string
+  default     = "210918199836"
 }
 
-variable "manager_count" {
-  description = "Single Swarm manager; do not add manager nodes."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.manager_count == 1
-    error_message = "Production must keep exactly one Swarm manager."
-  }
-}
-
-variable "worker_count" {
-  description = "No extra Swarm nodes; both replicas run on the one manager."
-  type        = number
-  default     = 0
-
-  validation {
-    condition     = var.worker_count == 0
-    error_message = "Production must not add Swarm worker nodes."
-  }
+variable "price_class" {
+  description = "CloudFront price class for production."
+  type        = string
+  default     = "PriceClass_100"
 }

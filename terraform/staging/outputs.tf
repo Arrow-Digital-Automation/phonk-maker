@@ -1,5 +1,5 @@
 output "app_url" {
-  description = "Live staging HTTPS URL."
+  description = "Staging HTTPS URL."
   value       = module.environment.app_url
 }
 
@@ -16,14 +16,10 @@ output "release_id" {
   value = module.environment.release_id
 }
 
-output "desired_replicas" {
-  value = module.environment.desired_replicas
+output "bucket_name" {
+  value = module.environment.bucket_name
 }
 
-output "manager_count" {
-  value = module.environment.manager_count
-}
-
-output "worker_count" {
-  value = module.environment.worker_count
+output "distribution_id" {
+  value = module.environment.distribution_id
 }
