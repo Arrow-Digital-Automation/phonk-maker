@@ -1,11 +1,11 @@
 output "app_url" {
   description = "HTTPS application URL for the deployed environment."
-  value       = coalesce(try(opencode_service.web.url, null), try(opencode_service.web.endpoint, null))
+  value       = local.app_url
 }
 
 output "verification_url" {
   description = "HTTPS release-marker URL used to verify the exact revision and release ID."
-  value       = "${trimSuffix(output.app_url.value, "/")}${local.release_marker_path}"
+  value       = "${trimSuffix(local.app_url, "/")}${local.release_marker_path}"
 }
 
 output "revision" {

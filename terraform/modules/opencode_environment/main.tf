@@ -7,6 +7,11 @@ locals {
   # The release marker is requested from the provider so the workflow can verify
   # the exact SHA and release ID over HTTPS before publishing a deployment receipt.
   release_marker_path = "/.well-known/opencode-release.json"
+
+  # Provider-computed HTTPS URL for the web service. Keep the url/endpoint
+  # fallback from the existing output expression so both provider attribute
+  # names remain supported.
+  app_url = coalesce(try(opencode_service.web.url, null), try(opencode_service.web.endpoint, null))
 }
 
 resource "opencode_swarm" "this" {
