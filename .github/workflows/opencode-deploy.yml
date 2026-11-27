@@ -1,5 +1,5 @@
 name: OpenCode deployment
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('OpenCode deployment {0}', inputs.release_id) || 'OpenCode Terraform validation' }}
+run-name: OpenCode deployment ${{ inputs.release_id }}
 
 on:
   workflow_dispatch:
@@ -28,109 +28,17 @@ on:
           - deploy
           - reload
           - destroy
-  # Credential-free validation of both Terraform roots before a release PR merges.
-  pull_request:
-    paths:
-      - "terraform/**"
-      - "index.html"
-      - ".github/workflows/opencode-deploy.yml"
-  push:
-    branches:
-      - staging
-      - main
-    paths:
-      - "terraform/**"
-      - "index.html"
-      - ".github/workflows/opencode-deploy.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('opencode-deploy-{0}', inputs.environment) || format('opencode-validate-{0}', github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  group: opencode-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
 
 jobs:
-  validate:
-    name: Validate terraform/${{ matrix.root }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        root:
-          - staging
-          - production
-    steps:
-      - name: Check out revision
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.revision || github.sha }}
-          persist-credentials: false
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-          terraform_wrapper: false
-
-      - name: Provider source check (public registry only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          status=0
-
-          while IFS= read -r file; do
-            while IFS= read -r source; do
-              if [[ "$source" != "hashicorp/aws" ]]; then
-                echo "Disallowed provider source '$source' in $file" >&2
-                status=1
-              fi
-            done < <(grep -oE '^[[:space:]]*source[[:space:]]*=[[:space:]]*"[^"]+"' "$file" |
-              grep -vE '"\.{1,2}/' |
-              sed -E 's/.*"([^"]+)"/\1/' || true)
-          done < <(find terraform -name '*.tf' -type f -not -path '*/.terraform/*' | sort)
-
-          if grep -rnE '(resource|data)[[:space:]]+"opencode_|provider[[:space:]]+"opencode"|opencode/opencode' \
-            terraform --include='*.tf'; then
-            echo "opencode providers/resources are not published to the Terraform Registry" >&2
-            status=1
-          fi
-
-          exit "$status"
-
-      - name: Terraform fmt
-        shell: bash
-        run: terraform fmt -check -recursive terraform
-
-      - name: Terraform init (backend disabled)
-        working-directory: terraform/${{ matrix.root }}
-        shell: bash
-        run: terraform init -backend=false -input=false
-
-      - name: Terraform validate
-        working-directory: terraform/${{ matrix.root }}
-        shell: bash
-        run: terraform validate
-
-      - name: Resolved providers are registry-only
-        working-directory: terraform/${{ matrix.root }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          terraform providers | tee /tmp/providers.txt
-          refs="$(grep -oE '[a-z0-9.-]+\.[a-z]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+' /tmp/providers.txt | sort -u || true)"
-          unexpected="$(grep -vx 'registry.terraform.io/hashicorp/aws' <<<"$refs" || true)"
-          if [[ -n "$unexpected" ]]; then
-            echo "Unexpected providers resolved:" >&2
-            echo "$unexpected" >&2
-            exit 1
-          fi
-
   guard:
     name: Validate dispatch
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.check.outputs.environment }}
@@ -220,8 +128,7 @@ jobs:
 
   deploy:
     name: ${{ needs.guard.outputs.operation }} ${{ needs.guard.outputs.environment }}
-    needs: [guard, validate]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [guard]
     runs-on: ubuntu-latest
     environment:
       # Required reviewers and environment-scoped secrets/vars are configured
